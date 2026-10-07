@@ -72,14 +72,36 @@ function pickProvider() {
   return hasGemini ? "gemini" : hasClaude ? "claude" : null;
 }
 
+// Models get retired, so when the configured one is gone, use the newest stable Pro (else Flash) model this key can call
+async function fallbackGeminiModel(ai) {
+  const found = [];
+  for await (const m of await ai.models.list()) {
+    const name = (m.name || "").replace(/^models\//, "");
+    const v = name.match(/^gemini-(\d+(?:\.\d+)?)-(pro|flash)(-preview)?$/);
+    if (v && (m.supportedActions || ["generateContent"]).includes("generateContent")) found.push({ name, ver: +v[1], pro: v[2] === "pro", stable: !v[3] });
+  }
+  found.sort((a, b) => b.pro - a.pro || b.stable - a.stable || b.ver - a.ver);
+  return found.length ? found[0].name : null;
+}
+
 async function rebuildWithGemini(image, media_type, wmm, hmm, res) {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const generate = (model) => ai.models.generateContent({
+    model,
+    contents: [{ role: "user", parts: [{ inlineData: { mimeType: media_type, data: image } }, { text: prompt(wmm, hmm) }] }],
+    config: { responseMimeType: "application/json", responseJsonSchema: geminiSchema(SCHEMA) },
+  });
+  const wanted = (process.env.GEMINI_MODEL || "").trim() || "gemini-2.5-pro";
   try {
-    const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || "gemini-2.5-pro",
-      contents: [{ role: "user", parts: [{ inlineData: { mimeType: media_type, data: image } }, { text: prompt(wmm, hmm) }] }],
-      config: { responseMimeType: "application/json", responseJsonSchema: geminiSchema(SCHEMA) },
-    });
+    let response;
+    try { response = await generate(wanted) }
+    catch (e) {
+      if (!(e instanceof ApiError && e.status === 404)) throw e;
+      const alt = await fallbackGeminiModel(ai).catch(() => null);
+      if (!alt || alt === wanted) return res.status(500).json({ error: "bad_model", message: `The Gemini model "${wanted}" is not available to this key. Set GEMINI_MODEL in Vercel to a model your key can use.` });
+      console.warn(`Gemini model ${wanted} not found; using ${alt}`);
+      response = await generate(alt);
+    }
     const text = response.text;
     if (!text) return res.status(422).json({ error: "empty", message: "The AI returned nothing for this photo. Try a clearer, front-on photo." });
     return res.status(200).json(JSON.parse(text));
@@ -87,7 +109,7 @@ async function rebuildWithGemini(image, media_type, wmm, hmm, res) {
     if (e instanceof ApiError) {
       if (e.status === 400 && /api key/i.test(e.message)) return res.status(500).json({ error: "bad_key", message: "The GEMINI_API_KEY in Vercel is not valid." });
       if (e.status === 401 || e.status === 403) return res.status(500).json({ error: "bad_key", message: "The GEMINI_API_KEY in Vercel is not valid or lacks access to this model." });
-      if (e.status === 404) return res.status(500).json({ error: "bad_model", message: "That Gemini model is not available. Set GEMINI_MODEL in Vercel to a model your key can use." });
+      if (e.status === 404) return res.status(500).json({ error: "bad_model", message: `The Gemini model "${wanted}" is not available to this key. Set GEMINI_MODEL in Vercel to a model your key can use.` });
       if (e.status === 429) return res.status(429).json({ error: "rate_limited", message: "Too many requests or quota used up on the Google key. Wait, then try again." });
       return res.status(502).json({ error: "upstream", message: "The AI service had an error. Try again shortly." });
     }
