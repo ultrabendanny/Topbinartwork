@@ -497,7 +497,10 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
     return { scale: s, w: Math.round(w), h: Math.round(h), reduced, effDpi: Math.round(s * 72) };
   }
 
+  // A newer file (or the sample finishing late) must not mix its pages into the current one
+  let loadSeq = 0;
   async function loadFile(buf, name, size) {
+    const seq = ++loadSeq, stale = () => seq !== loadSeq;
     showMsg('');
     closeDoc(); state.image = null; state.photoBlob = null; st = null; state.pages = [];
     state.baseName = name.replace(/\.[^.]+$/, '').replace(/[^\w\- .()]+/g, '_') || 'artwork';
@@ -512,22 +515,27 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
         let fallback = false;
         try {
           const r = await openWithPdfium(bytes);
+          if (stale()) { r.m.FPDF_CloseDocument(r.doc); r.m.pdfium.wasmExports.free(r.ptr); return false }
           state.pdfium = r; state.pages = r.pages;
           $('fileMeta').textContent = fmtBytes(size) + ' · ' + r.pages.length + ' artboard' + (r.pages.length > 1 ? 's' : '');
         } catch (e) {
+          if (stale()) return false;
           if (e && e.message === 'Invalid PDF') throw e;
           console.warn('PDFium unavailable, using pdf.js', e); fallback = true;
         }
         if (fallback) {
         showMsg('Using the backup renderer: CMYK colours (especially black) may look slightly off.', 'warn');
-        state.doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false, useSystemFonts: true }).promise;
-        for (let i = 1; i <= state.doc.numPages; i++) {
-          const p = await state.doc.getPage(i);
+        const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false, useSystemFonts: true }).promise;
+        const pages = [];
+        for (let i = 1; i <= doc.numPages; i++) {
+          const p = await doc.getPage(i);
           const vp = p.getViewport({ scale: 1 });
-          state.pages.push({ i, page: p, w: vp.width, h: vp.height, on: true,
-            label: 'Artboard ' + i, slug: state.doc.numPages > 1 ? 'artboard' + i : '' });
+          pages.push({ i, page: p, w: vp.width, h: vp.height, on: true,
+            label: 'Artboard ' + i, slug: doc.numPages > 1 ? 'artboard' + i : '' });
         }
-        const meta = await state.doc.getMetadata().catch(() => null);
+        const meta = await doc.getMetadata().catch(() => null);
+        if (stale()) { doc.destroy(); return false }
+        state.doc = doc; state.pages = pages;
         const creator = meta && meta.info && meta.info.Creator;
         $('fileMeta').textContent = fmtBytes(size) + ' · ' + state.pages.length + ' artboard' + (state.pages.length > 1 ? 's' : '') + (creator ? ' · ' + creator : '');
         }
@@ -539,18 +547,22 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
           const url = URL.createObjectURL(blob);
           const el = new Image(); el.src = url; await el.decode(); return el;
         });
+        if (stale()) return false;
         state.image = img; state.photoBlob = blob;
         // images keep their own pixels; treat as 72 DPI so "DPI" acts as a scale factor
         state.pages.push({ i: 1, w: img.width, h: img.height, on: true, isImage: true, img, label: 'Photo', slug: 'photo' });
         $('fileMeta').textContent = fmtBytes(size) + ' · ' + img.width + ' × ' + img.height + ' px image';
       }
     } catch (e) {
+      if (stale()) return false;
       busy('');
       showMsg(e && e.message && !/Invalid PDF/i.test(e.message) ? e.message : 'This file could not be read. Check it is a PDF, a PDF-compatible .ai, or an image.', 'err');
-      renderCards(); return;
+      renderCards(); return false;
     }
     await renderCards();
+    if (stale()) return false;
     busy('');
+    return true;
   }
 
   async function renderPage(p, scale, bg, original) {
@@ -1035,8 +1047,8 @@ Return only JSON in this shape: {"panels":[{"label":"short name such as GENERAL 
   if (b64 && !b64.startsWith('__')) {
     const bin = atob(b64), u = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
-    loadFile(u.buffer, 'KLIA BIN-3IN1.ai', u.length).then(() => {
-      $('fileName').innerHTML = 'KLIA BIN-3IN1.ai <span class="tag">Sample</span>';
+    loadFile(u.buffer, 'KLIA BIN-3IN1.ai', u.length).then(ok => {
+      if (ok) $('fileName').innerHTML = 'KLIA BIN-3IN1.ai <span class="tag">Sample</span>';
     });
   } else renderCards();
 })();
