@@ -524,7 +524,8 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
         for (let i = 1; i <= state.doc.numPages; i++) {
           const p = await state.doc.getPage(i);
           const vp = p.getViewport({ scale: 1 });
-          state.pages.push({ i, page: p, w: vp.width, h: vp.height, on: true });
+          state.pages.push({ i, page: p, w: vp.width, h: vp.height, on: true,
+            label: 'Artboard ' + i, slug: state.doc.numPages > 1 ? 'artboard' + i : '' });
         }
         const meta = await state.doc.getMetadata().catch(() => null);
         const creator = meta && meta.info && meta.info.Creator;
