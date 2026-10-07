@@ -1,0 +1,830 @@
+<title>Artwork JPG Exporter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Open+Sans:wght@700;800&family=Montserrat:wght@700;800&family=Roboto+Condensed:wght@700&display=swap">
+<style>
+/* Layout: one working column. Settings strip on top, artboard cards below, like a print-shop proof table. */
+:root {
+  --bg: #f3f4f2;
+  --surface: #ffffff;
+  --ink: #1a1d1b;
+  --muted: #5d6560;
+  --line: #d9ddd9;
+  --accent: #1f7a4a;
+  --accent-ink: #ffffff;
+  --proof: #4a4f4c;
+  --warn: #9a5b00;
+  --warn-bg: #fff4e0;
+  --err: #b42318;
+  --err-bg: #fdecea;
+  --display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #151816; --surface: #1e2220; --ink: #e9ece9; --muted: #9aa39d; --line: #333a36;
+  --accent: #45b97a; --accent-ink: #0d1a12; --proof: #2a2e2c; --warn: #f0b45a; --warn-bg: #3a2c12;
+  --err: #ff8a80; --err-bg: #3d1a17; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #151816; --surface: #1e2220; --ink: #e9ece9; --muted: #9aa39d; --line: #333a36;
+  --accent: #45b97a; --accent-ink: #0d1a12; --proof: #2a2e2c; --warn: #f0b45a; --warn-bg: #3a2c12;
+  --err: #ff8a80; --err-bg: #3d1a17; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--body); }
+.wrap { max-width: 1100px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 48px; display: grid; gap: 20px }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px }
+h1 { font: 700 2rem/1.1 var(--display); letter-spacing: .01em; margin: 0; text-transform: uppercase; text-wrap: balance }
+.sub { color: var(--muted); margin: 0; max-width: 62ch }
+
+.drop { border: 2px dashed var(--line); border-radius: 10px; background: var(--surface); padding: 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; transition: border-color .15s }
+.drop.over { border-color: var(--accent) }
+.drop .file { flex: 1 1 260px; min-width: 0 }
+.drop .name { font-weight: 600; overflow-wrap: anywhere }
+.drop .meta { color: var(--muted); font: 13px var(--mono) }
+.tag { display: inline-block; font: 600 11px var(--body); letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 99px; background: var(--bg); color: var(--muted); border: 1px solid var(--line); margin-left: 6px; vertical-align: 2px }
+
+button, .btn { font: 600 14px var(--body); border-radius: 7px; padding: 9px 14px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer }
+button:hover { border-color: var(--muted) }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink) }
+button.primary:hover { filter: brightness(1.08) }
+button:disabled { opacity: .5; cursor: default }
+
+.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px }
+.field { display: grid; gap: 6px; min-width: 0 }
+.field > span { font: 600 12px var(--body); letter-spacing: .07em; text-transform: uppercase; color: var(--muted) }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden }
+.seg button { flex: 1; border: 0; border-radius: 0; padding: 7px 4px; font-weight: 500; background: transparent }
+.seg button + button { border-left: 1px solid var(--line) }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg) }
+input[type=number], select { font: 14px var(--mono); padding: 7px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--ink); width: 100% }
+input[type=range] { width: 100%; accent-color: var(--accent) }
+input[type=color] { width: 44px; height: 34px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); padding: 2px }
+.row { display: flex; align-items: center; gap: 8px }
+.hint { font-size: 12.5px; color: var(--muted) }
+
+.bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px }
+.bar .count { color: var(--muted) }
+.actions { display: flex; flex-wrap: wrap; gap: 8px }
+
+.notice { padding: 10px 14px; border-radius: 8px; font-size: 14px }
+.notice.warn { background: var(--warn-bg); color: var(--warn) }
+.notice.err { background: var(--err-bg); color: var(--err) }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: grid; grid-template-rows: auto 1fr }
+.card.off { opacity: .55 }
+.thumb { background: var(--proof); padding: 18px; display: grid; place-items: center; height: 300px; position: relative }
+.thumb canvas { max-width: 100%; max-height: 100%; box-shadow: 0 1px 6px rgba(0,0,0,.35) }
+.thumb .pick { position: absolute; top: 10px; left: 10px; display: flex; align-items: center; gap: 6px; background: var(--surface); color: var(--ink); border-radius: 6px; padding: 3px 8px 3px 6px; font-size: 13px; font-weight: 600 }
+.thumb .pick input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0 }
+.info { padding: 12px 14px; display: grid; gap: 8px; align-content: start }
+.info .t { font: 700 1.15rem/1.1 var(--display); text-transform: uppercase; letter-spacing: .02em }
+.dims { font: 12.5px/1.5 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums }
+.dims b { color: var(--ink); font-weight: 500 }
+.scaled { color: var(--warn) }
+
+.empty { text-align: center; color: var(--muted); padding: 40px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px }
+.busy { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 99px; font-weight: 600; font-size: 14px; box-shadow: 0 4px 14px rgba(0,0,0,.25); max-width: calc(100% - 32px) }
+.card .btns { display: flex; flex-wrap: wrap; gap: 6px }
+.card .btns button { padding: 7px 11px; font-size: 13px }
+.badge { font: 600 11px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); margin-left: 6px; vertical-align: 2px }
+
+.editor { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); overflow: hidden }
+@media (max-width: 760px) { .editor { grid-template-columns: 1fr } }
+.ed-stage { background: var(--proof); padding: 20px; display: grid; place-items: center; position: relative; min-height: 360px }
+.ed-stage .holder { position: relative; line-height: 0 }
+.ed-stage canvas { max-width: 100%; box-shadow: 0 1px 8px rgba(0,0,0,.4) }
+.hl { position: absolute; border: 2px solid #ffb020; border-radius: 3px; pointer-events: none; box-shadow: 0 0 0 9999px rgba(0,0,0,0); opacity: 0; transition: opacity .12s }
+.hl.on { opacity: 1 }
+.ed-side { padding: 16px; display: grid; gap: 16px; align-content: start; min-width: 0 }
+.ed-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px }
+.ed-head h2 { font: 700 1.4rem/1.1 var(--display); text-transform: uppercase; margin: 0 }
+.ed-group { display: grid; gap: 8px }
+.ed-group > h3 { font: 600 12px var(--body); letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 0 }
+.el { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 8px }
+.el:hover, .el:focus-within { border-color: var(--muted) }
+.el .crop { width: 86px; height: 34px; background: var(--proof); border-radius: 4px; display: grid; place-items: center; overflow: hidden }
+.el .crop canvas { max-width: 100%; max-height: 100% }
+.el .chip { width: 86px; height: 34px; border-radius: 4px; border: 1px solid var(--line) }
+.el .mid { display: grid; gap: 6px; min-width: 0 }
+.el .mid input[type=text] { font: 600 15px var(--body); padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--ink); width: 100%; text-transform: none }
+.el .opts { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 13px; color: var(--muted) }
+.el .opts select { width: auto; padding: 4px 6px; font-size: 12.5px }
+.el .opts label { display: flex; align-items: center; gap: 5px }
+.ed-foot { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end }
+footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Artwork JPG Exporter</h1>
+      <p class="sub">Drop an Illustrator (.ai) or PDF file. Change the text or colours on any artboard, then save each one as a JPG at the print size you choose.</p>
+    </div>
+  </header>
+
+  <label class="drop" id="drop" for="fileInput">
+    <div class="file">
+      <div class="name" id="fileName">No file loaded</div>
+      <div class="meta" id="fileMeta">.ai (PDF compatible), .pdf, .png, .jpg, .webp, .svg</div>
+    </div>
+    <input type="file" id="fileInput" accept=".ai,.pdf,application/pdf,application/illustrator,image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+    <span class="btn primary" style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)">Choose file</span>
+    <span class="hint">or drag it here</span>
+  </label>
+
+  <div id="msg" hidden></div>
+
+  <section class="settings" aria-label="Export settings">
+    <div class="field">
+      <span>Resolution</span>
+      <div class="seg" id="dpiSeg">
+        <button type="button" data-dpi="72">72</button>
+        <button type="button" data-dpi="150" aria-pressed="true">150</button>
+        <button type="button" data-dpi="300">300</button>
+      </div>
+      <div class="row"><input type="number" id="dpi" min="10" max="1200" step="1" value="150"><span class="hint">DPI</span></div>
+    </div>
+    <div class="field">
+      <span>JPG quality <b id="qVal">92</b></span>
+      <input type="range" id="quality" min="40" max="100" value="92">
+      <span class="hint">92 is a good balance; 100 for print proofs.</span>
+    </div>
+    <div class="field">
+      <span>Background</span>
+      <div class="row"><input type="color" id="bg" value="#ffffff"><span class="hint">JPG has no transparency, so empty areas get this colour.</span></div>
+    </div>
+    <div class="field">
+      <span>Export as</span>
+      <select id="mode">
+        <option value="each">One JPG per artboard</option>
+        <option value="sheet">Layout sheet (all artboards side by side)</option>
+      </select>
+      <label class="row hint" id="labelsRow"><input type="checkbox" id="labels" checked> Show mm sizes on sheet</label>
+    </div>
+  </section>
+
+  <div class="bar">
+    <div class="count" id="count">No artboards yet</div>
+    <div class="actions">
+      <button type="button" id="selAll">Select all</button>
+      <button type="button" class="primary" id="exportBtn" disabled>Export JPG</button>
+    </div>
+  </div>
+
+  <section class="editor" id="editor" hidden aria-label="Edit artboard">
+    <div class="ed-stage"><div class="holder" id="edHolder"></div></div>
+    <div class="ed-side">
+      <div class="ed-head"><h2 id="edTitle">Edit artboard</h2>
+        <label class="row hint">Font for new text <select id="edFont" style="width:auto">
+          <option value="Open Sans">Open Sans Bold</option>
+          <option value="Montserrat">Montserrat Bold</option>
+          <option value="Barlow">Barlow Bold</option>
+          <option value="Roboto Condensed">Roboto Condensed Bold</option>
+          <option value="Arial">Arial Bold</option>
+        </select></label>
+      </div>
+      <div class="ed-group" id="edText"><h3>Text</h3><p class="hint" style="margin:0">Type to replace a line. It keeps the same size, colour and direction; long words are squeezed to fit.</p></div>
+      <div class="ed-group" id="edShapes"><h3>Colours</h3></div>
+      <div class="ed-foot">
+        <button type="button" id="edReset">Reset changes</button>
+        <button type="button" class="primary" id="edDone">Done</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="pages" class="grid"></div>
+
+  <footer>
+    <div>Conversion runs in your browser; files are not uploaded anywhere.</div>
+    <div>Older .ai files saved without "Create PDF Compatible File" cannot be read. Re-save from Illustrator with that option ticked, or export as PDF.</div>
+    <div>CMYK colours are converted to screen RGB, so print-exact shades may look slightly different from Illustrator.</div>
+  </footer>
+</div>
+<div class="busy" id="busy" hidden></div>
+
+<script type="application/octet-stream" id="sampleData">__SAMPLE_B64__</script>
+<script type="application/octet-stream" id="pdfiumWasm">__PDFIUM_GZ_B64__</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+(() => {
+  const PT_PER_MM = 72 / 25.4;
+  const MAX_PIXELS = 60e6;      // per JPG; keeps big print sizes inside browser canvas limits
+  const MAX_SIDE = 16000;
+  const $ = id => document.getElementById(id);
+  const state = { doc: null, image: null, pages: [], baseName: 'artwork', analysis: {}, editing: null };
+  let downloads = null;
+  if (window.claude && window.claude.use) window.claude.use('downloads').then(d => { downloads = d }).catch(() => {});
+
+  // pdf.js runs on the main thread (the worker script above registers itself as pdfjsWorker)
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+
+  // PDFium (the engine inside Chrome) renders CMYK artwork with Adobe-like colours, so it is the
+  // main engine; its WebAssembly is embedded gzipped. pdf.js is the fallback if it cannot start.
+  const PDFIUM_JS = 'https://cdn.jsdelivr.net/npm/@embedpdf/pdfium@2.15.1/dist/index.browser.js';
+  let pdfiumP = null;
+  const b64bytes = b64 => { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u };
+  function getPdfium() {
+    if (!pdfiumP) pdfiumP = (async () => {
+      const gz = b64bytes($('pdfiumWasm').textContent.trim());
+      const wasmBinary = await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+      const { init } = await import(PDFIUM_JS);
+      const m = await init({ wasmBinary });
+      m.PDFiumExt_Init();
+      return m;
+    })();
+    return pdfiumP;
+  }
+  const heap = m => m.pdfium.HEAPU8 && m.pdfium.HEAPU8.buffer.byteLength ? m.pdfium.HEAPU8 : new Uint8Array(m.pdfium.wasmExports.memory.buffer);
+
+  async function openWithPdfium(bytes) {
+    const m = await getPdfium();
+    const ptr = m.pdfium.wasmExports.malloc(bytes.length);
+    heap(m).set(bytes, ptr);
+    const doc = m.FPDF_LoadMemDocument(ptr, bytes.length, '');
+    if (!doc) { m.pdfium.wasmExports.free(ptr); throw new Error('Invalid PDF') }
+    const pages = [];
+    const n = m.FPDF_GetPageCount(doc);
+    for (let i = 0; i < n; i++) {
+      const pg = m.FPDF_LoadPage(doc, i);
+      pages.push({ i: i + 1, idx: i, w: m.FPDF_GetPageWidthF(pg), h: m.FPDF_GetPageHeightF(pg), on: true,
+        label: 'Artboard ' + (i + 1), slug: n > 1 ? 'artboard' + (i + 1) : '', edits: newEdits() });
+      m.FPDF_ClosePage(pg);
+    }
+    return { m, doc, ptr, pages };
+  }
+  function closeDoc() {
+    const d = state.pdfium;
+    if (d) { d.m.FPDF_CloseDocument(d.doc); d.m.pdfium.wasmExports.free(d.ptr); state.pdfium = null }
+    if (state.doc) { state.doc.destroy(); state.doc = null }
+    state.analysis = {}; closeEditor(false);
+  }
+  const newEdits = () => ({ colors: {}, lines: {}, font: 'Open Sans' });
+
+  // ---------- Artwork analysis: find the background, flat shapes and lines of (outlined) text ----------
+  const rgbHex = c => '#' + c.slice(0, 3).map(v => v.toString(16).padStart(2, '0')).join('');
+  const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const iou = (a1, a2, b1, b2) => Math.max(0, Math.min(a2, b2) - Math.max(a1, b1)) / (Math.max(a2, b2) - Math.min(a1, b1) || 1);
+
+  function analyze(idx) {
+    if (state.analysis[idx]) return state.analysis[idx];
+    const { m, doc } = state.pdfium, ex = m.pdfium.wasmExports;
+    const pg = m.FPDF_LoadPage(doc, idx);
+    const W = m.FPDF_GetPageWidthF(pg), H = m.FPDF_GetPageHeightF(pg);
+    const mem = ex.malloc(32);
+    const f32 = () => new Float32Array(heap(m).buffer, mem, 4);
+    const u32 = () => new Uint32Array(heap(m).buffer, mem, 4);
+    const i32 = () => new Int32Array(heap(m).buffer, mem, 4);
+    let ox = 0, oy = 0;
+    if (m.FPDFPage_GetCropBox(pg, mem, mem + 4, mem + 8, mem + 12)) { const f = f32(); ox = Math.min(f[0], f[2]); oy = Math.min(f[1], f[3]) }
+    const objs = [];
+    const n = m.FPDFPage_CountObjects(pg);
+    for (let k = 0; k < n; k++) {
+      const o = m.FPDFPage_GetObject(pg, k);
+      const type = m.FPDFPageObj_GetType(o);
+      if (type !== 1 && type !== 2) continue;             // text runs and vector paths only
+      if (!m.FPDFPageObj_GetBounds(o, mem, mem + 4, mem + 8, mem + 12)) continue;
+      const f = f32(); const l = f[0] - ox, b = f[1] - oy, r = f[2] - ox, t = f[3] - oy;
+      let segs = 0, fm = type === 1 ? 1 : 0, st = 0, fill = null, stroke = null;
+      if (type === 2) { segs = m.FPDFPath_CountSegments(o); if (m.FPDFPath_GetDrawMode(o, mem, mem + 4)) { const q = i32(); fm = q[0]; st = q[1] } }
+      if (m.FPDFPageObj_GetFillColor(o, mem, mem + 4, mem + 8, mem + 12)) fill = Array.from(u32());
+      if (m.FPDFPageObj_GetStrokeColor(o, mem, mem + 4, mem + 8, mem + 12)) stroke = Array.from(u32());
+      const vis = fm && fill && fill[3] ? fill : (st && stroke && stroke[3] ? stroke : null);
+      if (!vis) continue;
+      objs.push({ k, type, l, b, r, t, w: r - l, h: t - b, segs, fm, st, fill, stroke, color: rgbHex(vis) });
+    }
+    ex.free(mem); m.FPDF_ClosePage(pg);
+
+    const bgObjs = objs.filter(o => o.w * o.h >= 0.9 * W * H);
+    const rest = objs.filter(o => !bgObjs.includes(o));
+    // Letters on one line share both cross-axis edges (cap height) and sit close together along the line
+    const par = rest.map((_, i) => i);
+    const find = i => par[i] === i ? i : (par[i] = find(par[i]));
+    const edges = { v: [], h: [] };
+    for (let i = 0; i < rest.length; i++) for (let j = i + 1; j < rest.length; j++) {
+      const a = rest[i], c = rest[j];
+      const cx = Math.max(a.w, c.w), tx = Math.max(3, 0.08 * cx);
+      if (Math.abs(a.l - c.l) < tx && Math.abs(a.r - c.r) < tx && iou(a.l, a.r, c.l, c.r) > 0.6 &&
+          Math.max(a.b, c.b) - Math.min(a.t, c.t) < 0.6 * cx) edges.v.push([i, j]);
+      const cy = Math.max(a.h, c.h), ty = Math.max(3, 0.08 * cy);
+      if (Math.abs(a.b - c.b) < ty && Math.abs(a.t - c.t) < ty && iou(a.b, a.t, c.b, c.t) > 0.6 &&
+          Math.max(a.l, c.l) - Math.min(a.r, c.r) < 0.6 * cy) edges.h.push([i, j]);
+    }
+    const first = edges.v.length > edges.h.length ? 'v' : 'h', second = first === 'v' ? 'h' : 'v';
+    const orient = rest.map(() => null);
+    for (const [i, j] of edges[first]) { par[find(i)] = find(j); orient[i] = orient[j] = first }
+    for (const [i, j] of edges[second]) if (!orient[i] && !orient[j] || (orient[i] === second && orient[j] === second)) {
+      par[find(i)] = find(j); orient[i] = orient[j] = second;
+    }
+    const groups = {};
+    rest.forEach((o, i) => (groups[find(i)] = groups[find(i)] || []).push(i));
+    const lines = [], shapeObjs = [];
+    for (const g of Object.values(groups)) {
+      const os = g.map(i => rest[i]);
+      const isText = os.length >= 2 && os.some(o => o.type === 1 || o.segs > 6) && orient[g[0]];
+      if (!isText) { shapeObjs.push(...os); continue }
+      const l = Math.min(...os.map(o => o.l)), r = Math.max(...os.map(o => o.r)), b = Math.min(...os.map(o => o.b)), t = Math.max(...os.map(o => o.t));
+      lines.push({ objs: os.map(o => o.k), l, r, b, t, w: r - l, h: t - b, vertical: orient[g[0]] === 'v', count: os.length, color: os[os.length - 1].color });
+    }
+    // reading order: vertical lines right-to-left (text runs top-down), horizontal top-to-bottom
+    lines.sort((a, c) => a.vertical && c.vertical ? c.r - a.r : c.t - a.t);
+    lines.forEach((ln, i) => ln.id = 'L' + i);
+    // shapes with the same box (fill + outline copies) are one element
+    const shapes = [];
+    for (const o of shapeObjs.sort((a, c) => c.w * c.h - a.w * a.h)) {
+      const s = shapes.find(s => Math.abs(s.l - o.l) < 2 && Math.abs(s.r - o.r) < 2 && Math.abs(s.b - o.b) < 2 && Math.abs(s.t - o.t) < 2);
+      if (s) { s.objs.push(o.k); if (o.k > s.top) { s.top = o.k; s.color = o.color } }
+      else shapes.push({ objs: [o.k], top: o.k, l: o.l, r: o.r, b: o.b, t: o.t, w: o.w, h: o.h, color: o.color });
+    }
+    const shown = shapes.slice(0, 12);
+    shown.sort((a, c) => c.t - a.t || a.l - c.l);
+    shown.forEach((sh, i) => sh.id = 'S' + i);
+    const bg = bgObjs.length ? { id: 'BG', objs: bgObjs.map(o => o.k), l: 0, b: 0, r: W, t: H, w: W, h: H, color: bgObjs[bgObjs.length - 1].color } : null;
+    const objIndex = {}; objs.forEach(o => objIndex[o.k] = o);
+    return (state.analysis[idx] = { W, H, bg, shapes: shown, lines, objIndex });
+  }
+
+  // Apply colour changes and hide replaced lines on a loaded PDFium page (in memory only)
+  function applyEdits(m, pg, p) {
+    const a = analyze(p.idx), e = p.edits;
+    const setColor = (k, rgb, alpha) => {
+      const o = m.FPDFPage_GetObject(pg, k), info = a.objIndex[k];
+      if (!o || !info) return;
+      if (info.fm && info.fill) m.FPDFPageObj_SetFillColor(o, ...(rgb || info.fill.slice(0, 3)), alpha ?? info.fill[3]);
+      if (info.st && info.stroke) m.FPDFPageObj_SetStrokeColor(o, ...(rgb || info.stroke.slice(0, 3)), alpha ?? info.stroke[3]);
+    };
+    for (const el of [a.bg, ...a.shapes].filter(Boolean)) {
+      const c = e.colors[el.id]; if (c && c !== el.color) for (const k of el.objs) setColor(k, hexRgb(c));
+    }
+    for (const ln of a.lines) {
+      const le = e.lines[ln.id]; if (!le) continue;
+      if (le.hide || (le.text || '').trim()) { for (const k of ln.objs) setColor(k, null, 0) }
+      else if (le.color && le.color !== ln.color) for (const k of ln.objs) setColor(k, hexRgb(le.color));
+    }
+  }
+  const hasEdits = p => p.edits && (Object.keys(p.edits.colors).length || Object.values(p.edits.lines).some(l => l.hide || (l.text || '').trim() || l.color));
+
+  // Draw replacement text where the original line was, same cap height, colour and direction
+  function drawNewText(ctx, p, scale) {
+    const a = analyze(p.idx), e = p.edits, H = a.H, W = a.W;
+    const fam = `"${e.font}", Arial, sans-serif`;
+    for (const ln of a.lines) {
+      const le = e.lines[ln.id]; const text = le && !le.hide && (le.text || '').trim();
+      if (!text) continue;
+      const dir = ln.vertical ? (le.dir || 'down') : 'right';
+      const cap = (ln.vertical ? ln.w : ln.h) * scale;
+      ctx.font = `700 100px ${fam}`;
+      const capR = (ctx.measureText('H').actualBoundingBoxAscent || 72) / 100;
+      let size = cap / capR;
+      ctx.font = `700 ${size}px ${fam}`;
+      const tw = ctx.measureText(text).width;
+      const origLen = (ln.vertical ? ln.h : ln.w) * scale;
+      const room = (dir === 'down' ? 2 * ln.t - H : dir === 'up' ? H - 2 * ln.b : W - 2 * ln.l) * scale;
+      const avail = Math.max(origLen, room);
+      let squeeze = 1;
+      if (tw > avail) { squeeze = Math.max(0.7, avail / tw); if (tw * squeeze > avail) { size *= avail / (tw * squeeze); ctx.font = `700 ${size}px ${fam}` } }
+      ctx.save();
+      ctx.fillStyle = le.color || ln.color; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+      if (dir === 'down') { ctx.translate(ln.l * scale, (H - ln.t) * scale); ctx.rotate(Math.PI / 2) }
+      else if (dir === 'up') { ctx.translate(ln.r * scale, (H - ln.b) * scale); ctx.rotate(-Math.PI / 2) }
+      else ctx.translate(ln.l * scale, (H - ln.b) * scale);
+      ctx.scale(squeeze, 1);
+      ctx.fillText(text, 0, 0);
+      ctx.restore();
+    }
+  }
+  async function fontReady(fam) {
+    if (!document.fonts || fam === 'Arial') return;
+    try { await Promise.race([document.fonts.load(`700 40px "${fam}"`), new Promise(r => setTimeout(r, 3000))]) } catch (e) {}
+  }
+  function renderPdfium(p, w, h, bg, ctx, original) {
+    const { m, doc } = state.pdfium;
+    const pg = m.FPDF_LoadPage(doc, p.idx);
+    if (!original && hasEdits(p)) applyEdits(m, pg, p);
+    const bmp = m.FPDFBitmap_Create(w, h, 1);
+    if (!bmp) { m.FPDF_ClosePage(pg); throw new Error('Not enough memory for an image this large. Try a lower DPI.') }
+    const argb = (0xff000000 | parseInt(bg.slice(1), 16)) >>> 0;
+    m.FPDFBitmap_FillRect(bmp, 0, 0, w, h, argb);
+    // flags: annotations (0x01) + RGBA byte order (0x10)
+    m.FPDF_RenderPageBitmap(bmp, pg, 0, 0, w, h, 0, 0x01 | 0x10);
+    const buf = m.FPDFBitmap_GetBuffer(bmp);
+    const img = new ImageData(w, h);
+    img.data.set(heap(m).subarray(buf, buf + w * h * 4));
+    m.FPDFBitmap_Destroy(bmp); m.FPDF_ClosePage(pg);
+    ctx.putImageData(img, 0, 0);
+  }
+
+  const settings = () => ({
+    dpi: Math.min(1200, Math.max(10, +$('dpi').value || 150)),
+    quality: +$('quality').value / 100,
+    bg: $('bg').value,
+    mode: $('mode').value,
+    labels: $('labels').checked,
+  });
+
+  function showMsg(text, kind) {
+    const m = $('msg');
+    if (!text) { m.hidden = true; return }
+    m.className = 'notice ' + (kind || 'warn'); m.textContent = text; m.hidden = false;
+  }
+  function busy(text) { $('busy').textContent = text || ''; $('busy').hidden = !text }
+  const fmtBytes = n => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.round(n / 1e3) + ' KB';
+  const mm = pt => Math.round(pt / PT_PER_MM * 10) / 10;
+
+  // Output pixel size for a page (in points) at a DPI, scaled down if over the canvas limits
+  function outSize(wPt, hPt, dpi, maxPx = MAX_PIXELS) {
+    let s = dpi / 72, w = wPt * s, h = hPt * s, reduced = false;
+    const k = Math.min(1, Math.sqrt(maxPx / (w * h)), MAX_SIDE / Math.max(w, h));
+    if (k < 1) { s *= k; w *= k; h *= k; reduced = true }
+    return { scale: s, w: Math.round(w), h: Math.round(h), reduced, effDpi: Math.round(s * 72) };
+  }
+
+  async function loadFile(buf, name, size) {
+    showMsg('');
+    closeDoc(); state.image = null; state.pages = [];
+    state.baseName = name.replace(/\.[^.]+$/, '').replace(/[^\w\- .()]+/g, '_') || 'artwork';
+    $('fileName').textContent = name;
+    $('fileMeta').textContent = fmtBytes(size);
+    const bytes = new Uint8Array(buf);
+    const head = new TextDecoder('latin1').decode(bytes.slice(0, 1024));
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    busy('Reading ' + name + '…');
+    try {
+      if (head.includes('%PDF')) {
+        let fallback = false;
+        try {
+          const r = await openWithPdfium(bytes);
+          state.pdfium = r; state.pages = r.pages;
+          $('fileMeta').textContent = fmtBytes(size) + ' · ' + r.pages.length + ' artboard' + (r.pages.length > 1 ? 's' : '');
+        } catch (e) {
+          if (e && e.message === 'Invalid PDF') throw e;
+          console.warn('PDFium unavailable, using pdf.js', e); fallback = true;
+        }
+        if (fallback) {
+        showMsg('Using the backup renderer: CMYK colours (especially black) may look slightly off.', 'warn');
+        state.doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false, useSystemFonts: true }).promise;
+        for (let i = 1; i <= state.doc.numPages; i++) {
+          const p = await state.doc.getPage(i);
+          const vp = p.getViewport({ scale: 1 });
+          state.pages.push({ i, page: p, w: vp.width, h: vp.height, on: true });
+        }
+        const meta = await state.doc.getMetadata().catch(() => null);
+        const creator = meta && meta.info && meta.info.Creator;
+        $('fileMeta').textContent = fmtBytes(size) + ' · ' + state.pages.length + ' artboard' + (state.pages.length > 1 ? 's' : '') + (creator ? ' · ' + creator : '');
+        }
+      } else if (head.startsWith('%!PS-Adobe') || ext === 'ai' || ext === 'eps') {
+        throw new Error('This .ai file was saved without PDF compatibility, so a browser cannot read it. In Illustrator choose File > Save As, tick "Create PDF Compatible File", and drop the new file here. Exporting as PDF also works.');
+      } else {
+        const blob = new Blob([bytes], { type: ext === 'svg' ? 'image/svg+xml' : '' });
+        const img = await createImageBitmap(blob).catch(async () => {
+          const url = URL.createObjectURL(blob);
+          const el = new Image(); el.src = url; await el.decode(); return el;
+        });
+        state.image = img;
+        // images keep their own pixels; treat as 72 DPI so "DPI" acts as a scale factor
+        state.pages.push({ i: 1, w: img.width, h: img.height, on: true, isImage: true });
+        $('fileMeta').textContent = fmtBytes(size) + ' · ' + img.width + ' × ' + img.height + ' px image';
+      }
+    } catch (e) {
+      busy('');
+      showMsg(e && e.message && !/Invalid PDF/i.test(e.message) ? e.message : 'This file could not be read. Check it is a PDF, a PDF-compatible .ai, or an image.', 'err');
+      renderCards(); return;
+    }
+    await renderCards();
+    busy('');
+  }
+
+  async function renderPage(p, scale, bg, original) {
+    if (state.pdfium && !original && hasEdits(p)) await fontReady(p.edits.font);
+    const canvas = document.createElement('canvas');
+    const w = Math.round(p.w * scale), h = Math.round(p.h * scale);
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+    if (state.pdfium) {
+      renderPdfium(p, w, h, bg, ctx, original);
+      if (!original && hasEdits(p)) drawNewText(ctx, p, scale);
+    } else if (p.isImage) {
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(state.image, 0, 0, w, h);
+    } else {
+      const vp = p.page.getViewport({ scale });
+      await p.page.render({ canvasContext: ctx, viewport: vp, background: bg, intent: 'print' }).promise;
+    }
+    return canvas;
+  }
+
+  function dimsHtml(p) {
+    const s = settings();
+    const o = outSize(p.w, p.h, s.dpi);
+    const size = p.isImage ? `<b>${p.w} × ${p.h} px</b> source` : `<b>${mm(p.w)} × ${mm(p.h)} mm</b>`;
+    return `${size}<br>${o.w} × ${o.h} px at ${o.effDpi} DPI` + (o.reduced ? `<br><span class="scaled">Reduced from ${s.dpi} DPI to fit browser limits</span>` : '');
+  }
+
+  async function renderCards() {
+    const box = $('pages'); box.innerHTML = '';
+    if (!state.pages.length) {
+      box.innerHTML = '<div class="empty" style="grid-column:1/-1">Drop a file above to see its artboards here.</div>';
+      updateBar(); return;
+    }
+    for (const p of state.pages) {
+      const card = document.createElement('article');
+      card.className = 'card' + (p.on ? '' : ' off');
+      const label = p.label || (p.isImage ? 'Image' : 'Artboard 1');
+      const editable = !!state.pdfium;
+      card.innerHTML = `<div class="thumb"><label class="pick"><input type="checkbox" ${p.on ? 'checked' : ''}> <span class="pl"></span></label></div>
+        <div class="info"><div class="t"><span class="pl"></span><span class="badge" hidden>Edited</span></div><div class="dims"></div>
+        <div class="btns">${editable ? '<button type="button" class="ed">Edit text &amp; colours</button><button type="button" class="dup">Duplicate</button>' : ''}<button type="button" class="one">Save JPG</button>${p.copy ? '<button type="button" class="del">Remove</button>' : ''}</div></div>`;
+      card.querySelectorAll('.pl').forEach(x => x.textContent = label);
+      card.querySelector('.pick input').setAttribute('aria-label', 'Include ' + label);
+      card.querySelector('.dims').innerHTML = dimsHtml(p);
+      card.querySelector('.pick input').addEventListener('change', e => { p.on = e.target.checked; card.classList.toggle('off', !p.on); updateBar() });
+      card.querySelector('.one').addEventListener('click', () => exportPages([p], 'each'));
+      if (editable) {
+        card.querySelector('.ed').addEventListener('click', () => openEditor(p));
+        card.querySelector('.dup').addEventListener('click', () => duplicate(p));
+      }
+      if (p.copy) card.querySelector('.del').addEventListener('click', () => {
+        if (state.editing === p) closeEditor(false);
+        state.pages.splice(state.pages.indexOf(p), 1); renderCards();
+      });
+      p.card = card;
+      box.appendChild(card);
+    }
+    updateBar();
+    for (const p of state.pages) await renderThumb(p);
+  }
+
+  async function renderThumb(p) {
+    if (!p.card) return;
+    const thumbScale = Math.min(260 / p.h, 400 / p.w);
+    const c = await renderPage(p, thumbScale * (window.devicePixelRatio || 1), settings().bg);
+    c.style.width = Math.round(p.w * thumbScale) + 'px';
+    const th = p.card.querySelector('.thumb');
+    th.querySelectorAll('canvas').forEach(x => x.remove());
+    th.appendChild(c);
+    p.card.querySelector('.badge').hidden = !hasEdits(p);
+  }
+
+  let copyN = 0;
+  function duplicate(p) {
+    copyN++;
+    const base = p.label.replace(/ \(copy \d+\)$/, '');
+    const q = { ...p, card: null, copy: true, on: true, edits: JSON.parse(JSON.stringify(p.edits)),
+      label: `${base} (copy ${copyN})`, slug: (p.slug || 'artboard' + p.i).replace(/-copy\d+$/, '') + '-copy' + copyN };
+    state.pages.splice(state.pages.indexOf(p) + 1, 0, q);
+    renderCards().then(() => openEditor(q));
+  }
+
+  // ---------- Editor ----------
+  let edTimer = null, edRef = null;
+  async function openEditor(p) {
+    state.editing = p;
+    const a = analyze(p.idx);
+    $('editor').hidden = false;
+    $('edTitle').textContent = p.label;
+    $('edFont').value = p.edits.font;
+    // unedited render for the crop previews
+    const dpr = window.devicePixelRatio || 1;
+    const fitH = Math.min(560, Math.max(300, window.innerHeight * 0.65));
+    const viewScale = Math.min(fitH / p.h, 420 / p.w);
+    edRef = { viewScale, canvas: await renderPage(p, viewScale * dpr, settings().bg, true), dpr };
+    buildEditorList(p, a);
+    await refreshEditor();
+    $('editor').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  }
+  function closeEditor(rerender = true) {
+    const p = state.editing; state.editing = null;
+    if ($('editor')) $('editor').hidden = true;
+    if (rerender && p) renderThumb(p);
+  }
+  async function refreshEditor() {
+    const p = state.editing; if (!p) return;
+    const { viewScale, dpr } = edRef;
+    const c = await renderPage(p, viewScale * dpr, settings().bg);
+    c.style.width = Math.round(p.w * viewScale) + 'px';
+    const holder = $('edHolder');
+    holder.querySelectorAll('canvas').forEach(x => x.remove());
+    holder.prepend(c);
+  }
+  const scheduleRefresh = () => { clearTimeout(edTimer); edTimer = setTimeout(refreshEditor, 120) };
+
+  function buildEditorList(p, a) {
+    const holder = $('edHolder'); holder.innerHTML = '';
+    const pct = (el) => `left:${el.l / a.W * 100}%;top:${(a.H - el.t) / a.H * 100}%;width:${el.w / a.W * 100}%;height:${el.h / a.H * 100}%`;
+    const hl = {};
+    const addHl = el => { const d = document.createElement('div'); d.className = 'hl'; d.style.cssText = pct(el); holder.appendChild(d); hl[el.id] = d };
+    const hover = (row, id) => { row.addEventListener('mouseenter', () => hl[id].classList.add('on')); row.addEventListener('mouseleave', () => hl[id].classList.remove('on'));
+      row.addEventListener('focusin', () => hl[id].classList.add('on')); row.addEventListener('focusout', () => hl[id].classList.remove('on')) };
+
+    const tbox = $('edText'); tbox.querySelectorAll('.el, .none').forEach(x => x.remove());
+    if (!a.lines.length) tbox.insertAdjacentHTML('beforeend', '<div class="hint none">No text lines found on this artboard.</div>');
+    a.lines.forEach((ln, n) => {
+      addHl(ln);
+      const le = p.edits.lines[ln.id] || {};
+      const row = document.createElement('div'); row.className = 'el';
+      row.innerHTML = `<div class="crop"></div><div class="mid">
+          <input type="text" id="t-${p.slug}-${ln.id}" placeholder="Type new text for line ${n + 1}" aria-label="New text for line ${n + 1}" autocomplete="off">
+          <div class="opts">
+            ${ln.vertical ? `<label>Reads <select class="dir"><option value="down">top to bottom</option><option value="up">bottom to top</option></select></label>` : ''}
+            <label><input type="checkbox" class="hide"> Remove line</label>
+          </div></div>
+        <input type="color" class="col" aria-label="Colour of line ${n + 1}">`;
+      // crop of the original line, turned to read left-to-right
+      const s = edRef.viewScale * edRef.dpr, src = edRef.canvas;
+      const sx = ln.l * s, sy = (a.H - ln.t) * s, sw = Math.max(1, ln.w * s), sh = Math.max(1, ln.h * s);
+      const cc = document.createElement('canvas'), cx = cc.getContext('2d');
+      if (ln.vertical) { cc.width = sh; cc.height = sw; cx.translate(0, sw); cx.rotate(-Math.PI / 2) } else { cc.width = sw; cc.height = sh }
+      cx.drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh);
+      row.querySelector('.crop').appendChild(cc);
+      const ti = row.querySelector('input[type=text]'), col = row.querySelector('.col'), hide = row.querySelector('.hide'), dir = row.querySelector('.dir');
+      ti.value = le.text || ''; col.value = le.color || ln.color; hide.checked = !!le.hide; if (dir) dir.value = le.dir || 'down';
+      const upd = () => {
+        const v = { text: ti.value, hide: hide.checked, dir: dir ? dir.value : undefined, color: col.value !== ln.color ? col.value : undefined };
+        if (!v.text && !v.hide && !v.color && (!v.dir || v.dir === 'down')) delete p.edits.lines[ln.id]; else p.edits.lines[ln.id] = v;
+        ti.disabled = hide.checked; scheduleRefresh();
+      };
+      ti.disabled = hide.checked;
+      [ti, col].forEach(x => x.addEventListener('input', upd)); hide.addEventListener('change', upd); if (dir) dir.addEventListener('change', upd);
+      hover(row, ln.id);
+      tbox.appendChild(row);
+    });
+
+    const sbox = $('edShapes'); sbox.querySelectorAll('.el, .hint').forEach(x => x.remove());
+    const els = [a.bg, ...a.shapes].filter(Boolean);
+    if (!els.length) sbox.insertAdjacentHTML('beforeend', '<div class="hint">No flat colour shapes found on this artboard.</div>');
+    els.forEach((el, n) => {
+      addHl(el);
+      const row = document.createElement('label'); row.className = 'el';
+      const kind = el.h > 3 * el.w ? 'Vertical bar' : el.w > 3 * el.h ? 'Horizontal bar' : 'Block';
+      const same = els.filter(x => x.id !== 'BG' && (x.h > 3 * x.w ? 'Vertical bar' : x.w > 3 * x.h ? 'Horizontal bar' : 'Block') === kind);
+      const name = el.id === 'BG' ? 'Background' : kind + (same.length > 1 ? ' ' + (same.indexOf(el) + 1) : '');
+      row.innerHTML = `<div class="chip"></div><div class="mid"><b></b><span class="dims">${mm(el.w)} × ${mm(el.h)} mm</span></div><input type="color" aria-label="Colour of ${name}">`;
+      row.querySelector('b').textContent = name;
+      const inp = row.querySelector('input'), chip = row.querySelector('.chip');
+      inp.value = p.edits.colors[el.id] || el.color; chip.style.background = inp.value;
+      inp.addEventListener('input', () => {
+        chip.style.background = inp.value;
+        if (inp.value === el.color) delete p.edits.colors[el.id]; else p.edits.colors[el.id] = inp.value;
+        scheduleRefresh();
+      });
+      hover(row, el.id);
+      sbox.appendChild(row);
+    });
+  }
+
+  function refreshDims() { for (const p of state.pages) if (p.card) p.card.querySelector('.dims').innerHTML = dimsHtml(p) }
+  function updateBar() {
+    const n = state.pages.filter(p => p.on).length, t = state.pages.length;
+    $('count').textContent = t ? `${n} of ${t} artboard${t > 1 ? 's' : ''} selected` : 'No artboards yet';
+    $('exportBtn').disabled = !n;
+    $('exportBtn').textContent = settings().mode === 'sheet' ? 'Export layout sheet' : (n > 1 ? `Export ${n} JPGs (.zip)` : 'Export JPG');
+    $('selAll').textContent = n === t && t ? 'Clear all' : 'Select all';
+    $('labelsRow').hidden = settings().mode !== 'sheet';
+  }
+
+  const toJpg = (canvas, q) => new Promise((res, rej) => canvas.toBlob(b => b ? res(b) : rej(new Error('The browser could not create an image this large. Try a lower DPI.')), 'image/jpeg', q));
+
+  async function buildSheet(pages, s) {
+    // Layout like a proof sheet: artboards in a row on a grey board, mm sizes above/left
+    const maxH = Math.max(...pages.map(p => p.h));
+    const gapPt = 40, marginPt = s.labels ? 150 : 50, topPt = s.labels ? 100 : 50;
+    const totalW = pages.reduce((a, p) => a + p.w, 0) + gapPt * (pages.length - 1) + marginPt + 40;
+    const totalH = maxH + topPt + 40;
+    const o = outSize(totalW, totalH, s.dpi);
+    const k = o.scale;
+    const canvas = document.createElement('canvas');
+    canvas.width = o.w; canvas.height = o.h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#666766'; ctx.fillRect(0, 0, o.w, o.h);
+    let x = marginPt;
+    const font = Math.round(36 * k);
+    ctx.font = `500 ${font}px "Barlow", Arial, sans-serif`;
+    ctx.fillStyle = '#ffffff'; ctx.textBaseline = 'middle';
+    for (const [idx, p] of pages.entries()) {
+      busy(`Rendering ${p.label || 'artboard'}…`);
+      const c = await renderPage(p, k, s.bg);
+      const px = Math.round(x * k), py = Math.round(topPt * k);
+      ctx.drawImage(c, px, py);
+      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = Math.max(1, k); ctx.strokeRect(px, py, c.width, c.height);
+      if (s.labels && !p.isImage) {
+        ctx.textAlign = 'center';
+        ctx.fillText(mm(p.w) + 'mm', px + c.width / 2, Math.round(topPt * k / 2));
+        if (idx === 0) { ctx.textAlign = 'center'; ctx.fillText(mm(p.h) + 'mm', Math.round(marginPt * k / 2), py + c.height / 2) }
+      }
+      x += p.w + gapPt;
+    }
+    return { canvas, o };
+  }
+
+  async function save(filename, blob) {
+    if (downloads) {
+      try { await downloads.save({ filename, data: blob }); return 'saved' }
+      catch (e) {
+        if (e && e.code === 'declined') return 'declined';
+        if (e && e.code === 'too_large') throw new Error('That file is too large to save here. Try a lower DPI or fewer artboards.');
+        if (e && e.code === 'rate_limited') throw new Error('A save prompt is already open. Finish it, then try again.');
+        throw new Error('Saving is not available in this view.');
+      }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+    return 'saved';
+  }
+
+  async function exportPages(pages, mode) {
+    const s = settings();
+    if (!pages.length) return;
+    showMsg('');
+    $('exportBtn').disabled = true;
+    try {
+      let reduced = false, status;
+      if (mode === 'sheet') {
+        const { canvas, o } = await buildSheet(pages, s);
+        reduced = o.reduced;
+        busy('Encoding JPG…');
+        status = await save(`${state.baseName}-sheet-${o.effDpi}dpi.jpg`, await toJpg(canvas, s.quality));
+      } else {
+        const files = [];
+        for (const p of pages) {
+          busy(`Rendering ${p.label || 'artboard'}…`);
+          const o = outSize(p.w, p.h, s.dpi); reduced = reduced || o.reduced;
+          const c = await renderPage(p, o.scale, s.bg);
+          const words = p.edits ? Object.values(p.edits.lines).filter(l => !l.hide && (l.text || '').trim()).map(l => l.text.trim()).join(' ') : '';
+          let suffix = (p.slug ? '-' + p.slug : '') + (words ? '-' + words.replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) : '');
+          while (files.some(f => f.name === `${state.baseName}${suffix}-${o.effDpi}dpi.jpg`)) suffix += '_';
+          files.push({ name: `${state.baseName}${suffix}-${o.effDpi}dpi.jpg`, blob: await toJpg(c, s.quality) });
+          c.width = c.height = 0;
+        }
+        if (files.length === 1) {
+          busy('Saving…');
+          status = await save(files[0].name, files[0].blob);
+        } else {
+          busy('Zipping ' + files.length + ' JPGs…');
+          const zip = new JSZip();
+          for (const f of files) zip.file(f.name, f.blob);
+          status = await save(`${state.baseName}-jpg.zip`, await zip.generateAsync({ type: 'blob', compression: 'STORE' }));
+        }
+      }
+      if (status === 'declined') showMsg('Save cancelled.', 'warn');
+      else if (reduced) showMsg('Exported. Some artboards were reduced below the chosen DPI to stay within browser limits.', 'warn');
+    } catch (e) {
+      showMsg(e.message || String(e), 'err');
+    } finally {
+      busy(''); updateBar();
+    }
+  }
+
+  // Wiring
+  $('fileInput').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    await loadFile(await f.arrayBuffer(), f.name, f.size);
+    e.target.value = '';
+  });
+  const drop = $('drop');
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over') }));
+  ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over') }));
+  drop.addEventListener('drop', async e => {
+    const f = e.dataTransfer.files[0]; if (f) await loadFile(await f.arrayBuffer(), f.name, f.size);
+  });
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => e.preventDefault());
+
+  $('dpiSeg').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    $('dpi').value = b.dataset.dpi; syncSeg(); refreshDims();
+  });
+  function syncSeg() { for (const b of $('dpiSeg').children) b.setAttribute('aria-pressed', String(b.dataset.dpi === String(+$('dpi').value))) }
+  $('dpi').addEventListener('input', () => { syncSeg(); refreshDims() });
+  $('quality').addEventListener('input', () => { $('qVal').textContent = $('quality').value });
+  $('bg').addEventListener('change', () => { const p = state.editing; renderCards().then(() => p && openEditor(p)) });
+  $('mode').addEventListener('change', updateBar);
+  $('labels').addEventListener('change', updateBar);
+  $('selAll').addEventListener('click', () => {
+    const all = state.pages.every(p => p.on);
+    for (const p of state.pages) { p.on = !all; if (p.card) { p.card.querySelector('input').checked = p.on; p.card.classList.toggle('off', !p.on) } }
+    updateBar();
+  });
+  $('edDone').addEventListener('click', () => closeEditor(true));
+  $('edReset').addEventListener('click', () => { const p = state.editing; if (!p) return; const f = p.edits.font; p.edits = newEdits(); p.edits.font = f; buildEditorList(p, analyze(p.idx)); refreshEditor() });
+  $('edFont').addEventListener('change', () => { const p = state.editing; if (!p) return; p.edits.font = $('edFont').value; refreshEditor() });
+  $('exportBtn').addEventListener('click', () => exportPages(state.pages.filter(p => p.on), settings().mode));
+
+  // Open with the sample file loaded so the tool shows what it does
+  const b64 = $('sampleData').textContent.trim();
+  if (b64 && !b64.startsWith('__')) {
+    const bin = atob(b64), u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    loadFile(u.buffer, 'KLIA BIN-3IN1.ai', u.length).then(() => {
+      $('fileName').innerHTML = 'KLIA BIN-3IN1.ai <span class="tag">Sample</span>';
+    });
+  } else renderCards();
+})();
+</script>
