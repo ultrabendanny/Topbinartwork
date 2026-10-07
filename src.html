@@ -31,6 +31,7 @@
   --err: #ff8a80; --err-bg: #3d1a17; color-scheme: dark }
 
 * { box-sizing: border-box }
+[hidden] { display: none !important }
 body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--body); }
 .wrap { max-width: 1100px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 48px; display: grid; gap: 20px }
 header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px }
@@ -114,6 +115,14 @@ input[type=color] { width: 44px; height: 34px; border: 1px solid var(--line); bo
 .el .opts select { width: auto; padding: 4px 6px; font-size: 12.5px }
 .el .opts label { display: flex; align-items: center; gap: 5px }
 .ed-foot { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end }
+.photo { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px }
+.photo h2 { font: 700 1.3rem/1.1 var(--display); text-transform: uppercase; margin: 0 }
+.photo .row { flex-wrap: wrap }
+.photo .size input { width: 84px }
+.st-stage { position: relative; background: var(--proof); border-radius: 8px; overflow: hidden; touch-action: none; user-select: none; line-height: 0 }
+.st-stage canvas { width: 100%; height: auto; display: block }
+.st-stage svg { position: absolute; inset: 0; width: 100%; height: 100% }
+.handle { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; background: #ffb020; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.5); cursor: grab; touch-action: none; display: grid; place-items: center; font: 700 10px/1 var(--body); color: #1a1d1b }
 footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important } }
 </style>
@@ -122,14 +131,14 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
   <header>
     <div>
       <h1>Artwork JPG Exporter</h1>
-      <p class="sub">Drop an Illustrator (.ai) or PDF file. Change the text or colours on any artboard, then save each one as a JPG at the print size you choose.</p>
+      <p class="sub">Drop an Illustrator (.ai) or PDF file, or a photo of the product. Rebuild photos into flat artwork, change text or colours, then save each panel as a JPG at print size.</p>
     </div>
   </header>
 
   <label class="drop" id="drop" for="fileInput">
     <div class="file">
       <div class="name" id="fileName">No file loaded</div>
-      <div class="meta" id="fileMeta">.ai (PDF compatible), .pdf, .png, .jpg, .webp, .svg</div>
+      <div class="meta" id="fileMeta">.ai (PDF compatible), .pdf, or a photo (.jpg, .png, .webp)</div>
     </div>
     <input type="file" id="fileInput" accept=".ai,.pdf,application/pdf,application/illustrator,image/png,image/jpeg,image/webp,image/svg+xml" hidden>
     <span class="btn primary" style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)">Choose file</span>
@@ -137,6 +146,23 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
   </label>
 
   <div id="msg" hidden></div>
+
+  <section class="photo" id="photoTools" hidden aria-label="Photo to artwork">
+    <h2>Photo to flat artwork</h2>
+    <p class="sub" style="margin:0">This is a photo. Turn the printed panels in it into flat 2D artwork at print size.</p>
+    <div class="row size"><span class="hint">Panel size</span>
+      <input type="number" id="panW" value="370" min="10" max="5000" aria-label="Panel width in mm"><span class="hint">×</span>
+      <input type="number" id="panH" value="770" min="10" max="5000" aria-label="Panel height in mm"><span class="hint">mm</span></div>
+    <div class="actions">
+      <button type="button" class="primary" id="rebuildBtn">Rebuild clean artwork (AI)</button>
+      <button type="button" id="straightenBtn" hidden>Straighten a panel by hand</button>
+    </div>
+    <div class="hint" id="rebuildNote">The AI reads the text, colours and layout of every panel in the photo and redraws them as sharp artwork you can edit and export. Front-on photos work best.</div>
+    <div id="stBox" hidden>
+      <div class="st-stage" id="stStage"></div>
+      <div class="actions" style="margin-top:10px"><button type="button" class="primary" id="stAdd">Add as flat panel</button><button type="button" id="stClose">Close</button></div>
+    </div>
+  </section>
 
   <section class="settings" aria-label="Export settings">
     <div class="field">
@@ -174,6 +200,7 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
       <button type="button" class="primary" id="exportBtn" disabled>Export JPG</button>
     </div>
   </div>
+
 
   <section class="editor" id="editor" hidden aria-label="Edit artboard">
     <div class="ed-stage"><div class="holder" id="edHolder"></div></div>
@@ -349,9 +376,34 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
     return (state.analysis[idx] = { W, H, bg, shapes: shown, lines, objIndex });
   }
 
+  // Generated artwork (rebuilt from a photo) is a simple spec: background, rectangles, text lines
+  function analysisOf(p) {
+    if (!p.gen) return analyze(p.idx);
+    if (p.genA) return p.genA;
+    const W = p.w, H = p.h, g = p.gen;
+    const box = (e) => { const l = e.x * W, r = (e.x + e.w) * W, t = H - e.y * H, b = H - (e.y + e.h) * H; return { l, r, b, t, w: r - l, h: t - b } };
+    const lines = [], shapes = [];
+    g.elements.forEach((e, i) => {
+      const bx = box(e);
+      if (e.kind === 'text') lines.push({ id: 'L' + i, objs: [], ...bx, vertical: e.rotation !== 0, dir: e.rotation === -90 ? 'up' : e.rotation === 90 ? 'down' : 'right', color: e.color, text: e.text });
+      else shapes.push({ id: 'S' + i, objs: [], ...bx, color: e.color });
+    });
+    return (p.genA = { W, H, bg: { id: 'BG', objs: [], l: 0, b: 0, r: W, t: H, w: W, h: H, color: g.background }, shapes, lines, objIndex: {} });
+  }
+  function renderGen(ctx, p, scale, original) {
+    const a = analysisOf(p), e = original ? newEdits() : p.edits;
+    if (original) e.font = p.edits.font;
+    ctx.fillStyle = e.colors.BG || a.bg.color; ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    for (const sh of a.shapes) {
+      ctx.fillStyle = e.colors[sh.id] || sh.color;
+      ctx.fillRect(sh.l * scale, (a.H - sh.t) * scale, sh.w * scale, sh.h * scale);
+    }
+    drawNewText(ctx, p, scale, e);
+  }
+
   // Apply colour changes and hide replaced lines on a loaded PDFium page (in memory only)
   function applyEdits(m, pg, p) {
-    const a = analyze(p.idx), e = p.edits;
+    const a = analysisOf(p), e = p.edits;
     const setColor = (k, rgb, alpha) => {
       const o = m.FPDFPage_GetObject(pg, k), info = a.objIndex[k];
       if (!o || !info) return;
@@ -370,13 +422,14 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
   const hasEdits = p => p.edits && (Object.keys(p.edits.colors).length || Object.values(p.edits.lines).some(l => l.hide || (l.text || '').trim() || l.color));
 
   // Draw replacement text where the original line was, same cap height, colour and direction
-  function drawNewText(ctx, p, scale) {
-    const a = analyze(p.idx), e = p.edits, H = a.H, W = a.W;
+  function drawNewText(ctx, p, scale, edits) {
+    const a = analysisOf(p), e = edits || p.edits, H = a.H, W = a.W;
     const fam = `"${e.font}", Arial, sans-serif`;
     for (const ln of a.lines) {
-      const le = e.lines[ln.id]; const text = le && !le.hide && (le.text || '').trim();
+      const le = e.lines[ln.id] || {};
+      const text = le.hide ? '' : ((le.text || '').trim() || (p.gen ? ln.text : ''));
       if (!text) continue;
-      const dir = ln.vertical ? (le.dir || 'down') : 'right';
+      const dir = ln.vertical ? (le.dir || ln.dir || 'down') : 'right';
       const cap = (ln.vertical ? ln.w : ln.h) * scale;
       ctx.font = `700 100px ${fam}`;
       const capR = (ctx.measureText('H').actualBoundingBoxAscent || 72) / 100;
@@ -385,7 +438,7 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
       const tw = ctx.measureText(text).width;
       const origLen = (ln.vertical ? ln.h : ln.w) * scale;
       const room = (dir === 'down' ? 2 * ln.t - H : dir === 'up' ? H - 2 * ln.b : W - 2 * ln.l) * scale;
-      const avail = Math.max(origLen, room);
+      const avail = p.gen && !(le.text || '').trim() ? origLen : Math.max(origLen, room);
       let squeeze = 1;
       if (tw > avail) { squeeze = Math.max(0.7, avail / tw); if (tw * squeeze > avail) { size *= avail / (tw * squeeze); ctx.font = `700 ${size}px ${fam}` } }
       ctx.save();
@@ -446,7 +499,7 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
 
   async function loadFile(buf, name, size) {
     showMsg('');
-    closeDoc(); state.image = null; state.pages = [];
+    closeDoc(); state.image = null; state.photoBlob = null; st = null; state.pages = [];
     state.baseName = name.replace(/\.[^.]+$/, '').replace(/[^\w\- .()]+/g, '_') || 'artwork';
     $('fileName').textContent = name;
     $('fileMeta').textContent = fmtBytes(size);
@@ -485,9 +538,9 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
           const url = URL.createObjectURL(blob);
           const el = new Image(); el.src = url; await el.decode(); return el;
         });
-        state.image = img;
+        state.image = img; state.photoBlob = blob;
         // images keep their own pixels; treat as 72 DPI so "DPI" acts as a scale factor
-        state.pages.push({ i: 1, w: img.width, h: img.height, on: true, isImage: true });
+        state.pages.push({ i: 1, w: img.width, h: img.height, on: true, isImage: true, img, label: 'Photo', slug: 'photo' });
         $('fileMeta').textContent = fmtBytes(size) + ' · ' + img.width + ' × ' + img.height + ' px image';
       }
     } catch (e) {
@@ -500,13 +553,18 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
   }
 
   async function renderPage(p, scale, bg, original) {
-    if (state.pdfium && !original && hasEdits(p)) await fontReady(p.edits.font);
+    if ((state.pdfium || p.gen) && p.edits && (p.gen || (!original && hasEdits(p)))) await fontReady(p.edits.font);
     const canvas = document.createElement('canvas');
     const w = Math.round(p.w * scale), h = Math.round(p.h * scale);
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
-    if (state.pdfium) {
+    if (p.gen) {
+      renderGen(ctx, p, scale, original);
+    } else if (p.img) {
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(p.img, 0, 0, w, h);
+    } else if (state.pdfium) {
       renderPdfium(p, w, h, bg, ctx, original);
       if (!original && hasEdits(p)) drawNewText(ctx, p, scale);
     } else if (p.isImage) {
@@ -522,7 +580,7 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
   function dimsHtml(p) {
     const s = settings();
     const o = outSize(p.w, p.h, s.dpi);
-    const size = p.isImage ? `<b>${p.w} × ${p.h} px</b> source` : `<b>${mm(p.w)} × ${mm(p.h)} mm</b>`;
+    const size = p.isImage && !p.gen && !p.flat ? `<b>${p.w} × ${p.h} px</b> source` : `<b>${mm(p.w)} × ${mm(p.h)} mm</b>`;
     return `${size}<br>${o.w} × ${o.h} px at ${o.effDpi} DPI` + (o.reduced ? `<br><span class="scaled">Reduced from ${s.dpi} DPI to fit browser limits</span>` : '');
   }
 
@@ -530,13 +588,13 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
     const box = $('pages'); box.innerHTML = '';
     if (!state.pages.length) {
       box.innerHTML = '<div class="empty" style="grid-column:1/-1">Drop a file above to see its artboards here.</div>';
-      updateBar(); return;
+      updateBar(); updatePhotoTools(); return;
     }
     for (const p of state.pages) {
       const card = document.createElement('article');
       card.className = 'card' + (p.on ? '' : ' off');
       const label = p.label || (p.isImage ? 'Image' : 'Artboard 1');
-      const editable = !!state.pdfium;
+      const editable = !!p.gen || (!!state.pdfium && p.idx != null);
       card.innerHTML = `<div class="thumb"><label class="pick"><input type="checkbox" ${p.on ? 'checked' : ''}> <span class="pl"></span></label></div>
         <div class="info"><div class="t"><span class="pl"></span><span class="badge" hidden>Edited</span></div><div class="dims"></div>
         <div class="btns">${editable ? '<button type="button" class="ed">Edit text &amp; colours</button><button type="button" class="dup">Duplicate</button>' : ''}<button type="button" class="one">Save JPG</button>${p.copy ? '<button type="button" class="del">Remove</button>' : ''}</div></div>`;
@@ -556,7 +614,7 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
       p.card = card;
       box.appendChild(card);
     }
-    updateBar();
+    updateBar(); updatePhotoTools();
     for (const p of state.pages) await renderThumb(p);
   }
 
@@ -581,11 +639,161 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
     renderCards().then(() => openEditor(q));
   }
 
+  // ---------- Photo to artwork ----------
+  function updatePhotoTools() {
+    const has = state.pages.some(p => p.isImage && !p.gen && !p.flat);
+    $('photoTools').hidden = !has;
+    if (!has) $('stBox').hidden = true;
+  }
+  const panelMm = () => ({ wmm: Math.max(10, +$('panW').value || 370), hmm: Math.max(10, +$('panH').value || 770) });
+  const photoPage = () => state.pages.find(p => p.isImage && !p.gen && !p.flat);
+
+  // Downscaled JPEG of the photo for the AI (keeps requests small)
+  async function photoJpeg(maxSide = 1600) {
+    const img = photoPage().img, k = Math.min(1, maxSide / Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
+  }
+  const REBUILD_PROMPT = (wmm, hmm) => `You are reconstructing flat print artwork from a photo of a product, for example a recycling bin with printed front panels.
+Find each distinct printed panel visible in the photo, ordered left to right. For each panel, reconstruct the flat 2D artwork as if it were printed on a ${wmm} mm wide by ${hmm} mm tall rectangle. Remove perspective, lighting, reflections and shadows, and use the intended flat print colours as hex (a black panel is near #231f20, white is #ffffff).
+Describe each panel as a background colour plus elements:
+- kind "rect": a solid coloured rectangle (bars, colour blocks). text is "".
+- kind "text": one element per line of text, with the exact text as printed (keep its case). The box is tight around the letters. rotation is 0 for normal horizontal text, 90 if the line reads top-to-bottom (letter tops face right), -90 if it reads bottom-to-top.
+x, y, w, h are fractions from 0 to 1 of the panel's width and height, origin at the top-left, giving the element's bounding box on the flat panel. Measure carefully from the photo so proportions match.
+Return only JSON in this shape: {"panels":[{"label":"short name such as GENERAL WASTE","background":"#rrggbb","elements":[{"kind":"rect","x":0.1,"y":0.1,"w":0.1,"h":0.8,"color":"#ffffff","text":"","rotation":0}]}]}`;
+
+  async function rebuildWithAI() {
+    const ph = photoPage(); if (!ph) return;
+    const { wmm, hmm } = panelMm();
+    showMsg('');
+    $('rebuildBtn').disabled = true;
+    busy('Reading the photo… this can take up to a minute');
+    try {
+      const blob = await photoJpeg();
+      let data = null;
+      const sample = window.claude && window.claude.use ? await window.claude.use('sample').catch(() => null) : null;
+      const lim = sample ? await sample.limits().catch(() => null) : null;
+      if (sample && lim && lim.images) {
+        try { data = await sample.json(REBUILD_PROMPT(wmm, hmm), { images: [blob], modelTier: 'complex' }) }
+        catch (e) {
+          if (e && e.code === 'not_granted') throw new Error('Allow this page to ask Claude, then try again.');
+          if (e && e.code === 'rate_limited') throw new Error('Too many requests just now. Wait a moment, then try again.');
+          throw new Error('Claude could not read this photo. Try a clearer, front-on photo.');
+        }
+      } else {
+        const b64 = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(',')[1]); fr.readAsDataURL(blob) });
+        let res;
+        try { res = await fetch('api/rebuild', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: b64, media_type: 'image/jpeg', width_mm: wmm, height_mm: hmm }) }) }
+        catch (e) { throw new Error('AI rebuild needs the hosted version of this app. Open it from your Vercel link instead.') }
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (body.error === 'no_key') throw new Error('AI rebuild is not set up yet: add ANTHROPIC_API_KEY in the Vercel project settings, then redeploy.');
+          if (res.status === 404) throw new Error('AI rebuild needs the hosted version of this app. Open it from your Vercel link instead.');
+          throw new Error(body.message || 'The AI could not read this photo. Try a clearer, front-on photo.');
+        }
+        data = body;
+      }
+      const panels = (data && Array.isArray(data.panels) ? data.panels : []).filter(pn => pn && Array.isArray(pn.elements));
+      if (!panels.length) throw new Error('No printed panels were found in this photo. Try a clearer, front-on photo.');
+      const clamp = v => Math.max(0, Math.min(1, +v || 0));
+      const hex = c => /^#[0-9a-f]{6}$/i.test(c || '') ? c.toLowerCase() : '#ffffff';
+      ph.on = false;
+      panels.forEach((pn, k) => {
+        const gen = { background: hex(pn.background), elements: pn.elements.map(e => ({
+          kind: e.kind === 'text' ? 'text' : 'rect', x: clamp(e.x), y: clamp(e.y), w: clamp(e.w), h: clamp(e.h),
+          color: hex(e.color), text: String(e.text || ''), rotation: [90, -90].includes(+e.rotation) ? +e.rotation : 0 })).filter(e => e.w > 0 && e.h > 0 && (e.kind === 'rect' || e.text.trim())) };
+        const name = String(pn.label || '').trim().slice(0, 40) || 'Panel ' + (k + 1);
+        state.pages.push({ i: state.pages.length + 1, w: wmm * PT_PER_MM, h: hmm * PT_PER_MM, on: true, gen, edits: newEdits(),
+          label: `Panel ${k + 1}: ${name}`, slug: 'panel' + (k + 1) + '-' + name.replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').slice(0, 30), copy: true });
+      });
+      $('mode').value = 'sheet';
+      await renderCards();
+      showMsg(`Rebuilt ${panels.length} panel${panels.length > 1 ? 's' : ''} from the photo. Export is set to a layout sheet. Check the panels against the photo, then edit text or colours if needed.`, 'warn');
+    } catch (e) {
+      showMsg(e.message || String(e), 'err');
+    } finally { busy(''); $('rebuildBtn').disabled = false }
+  }
+
+  // Straighten: drag 4 corners onto a panel, then warp that quad into a flat rectangle
+  let st = null;
+  function openStraighten() {
+    const ph = photoPage(); if (!ph) return;
+    const img = ph.img, k = Math.min(1, 1400 / Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const stage = $('stStage'); stage.innerHTML = ''; stage.appendChild(c);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 1 1'); svg.setAttribute('preserveAspectRatio', 'none');
+    svg.innerHTML = '<polygon fill="rgba(255,176,32,.18)" stroke="#ffb020" stroke-width="0.004" vector-effect="non-scaling-stroke"/>';
+    stage.appendChild(svg);
+    const pts = st && st.pts ? st.pts : [[0.3, 0.25], [0.6, 0.25], [0.6, 0.85], [0.3, 0.85]];
+    st = { pts, handles: [] };
+    const names = ['TL', 'TR', 'BR', 'BL'];
+    const draw = () => {
+      svg.querySelector('polygon').setAttribute('points', st.pts.map(p => p.join(',')).join(' '));
+      st.handles.forEach((h, i) => { h.style.left = st.pts[i][0] * 100 + '%'; h.style.top = st.pts[i][1] * 100 + '%' });
+    };
+    names.forEach((n, i) => {
+      const h = document.createElement('div'); h.className = 'handle'; h.textContent = n; h.tabIndex = 0;
+      h.setAttribute('role', 'slider'); h.setAttribute('aria-label', 'Panel corner ' + n);
+      h.addEventListener('pointerdown', e => {
+        e.preventDefault(); h.setPointerCapture(e.pointerId);
+        const move = ev => { const r = stage.getBoundingClientRect(); st.pts[i] = [Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height))]; draw() };
+        const up = () => { h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up) };
+        h.addEventListener('pointermove', move); h.addEventListener('pointerup', up);
+      });
+      h.addEventListener('keydown', e => {
+        const d = { ArrowLeft: [-0.005, 0], ArrowRight: [0.005, 0], ArrowUp: [0, -0.005], ArrowDown: [0, 0.005] }[e.key];
+        if (d) { e.preventDefault(); st.pts[i] = [Math.max(0, Math.min(1, st.pts[i][0] + d[0])), Math.max(0, Math.min(1, st.pts[i][1] + d[1]))]; draw() }
+      });
+      stage.appendChild(h); st.handles.push(h);
+    });
+    draw();
+    $('stBox').hidden = false;
+    $('stBox').scrollIntoView({ block: 'nearest' });
+  }
+  function warpPanel() {
+    const ph = photoPage(); const img = ph.img;
+    const { wmm, hmm } = panelMm();
+    const P = st.pts.map(([x, y]) => [x * img.width, y * img.height]);
+    const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = P;
+    // square-to-quad homography (u along TL->TR, v along TL->BL)
+    const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3, dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+    const det = dx1 * dy2 - dx2 * dy1 || 1e-9;
+    const g = (dx3 * dy2 - dx2 * dy3) / det, hh = (dx1 * dy3 - dx3 * dy1) / det;
+    const a = x1 - x0 + g * x1, b = x3 - x0 + hh * x3, c = x0, d = y1 - y0 + g * y1, e = y3 - y0 + hh * y3, f = y0;
+    // output at roughly the photo's own resolution along the panel height
+    const srcH = Math.max(Math.hypot(x3 - x0, y3 - y0), Math.hypot(x2 - x1, y2 - y1));
+    const oh = Math.max(200, Math.min(4000, Math.round(srcH * 1.2))), ow = Math.max(100, Math.round(oh * wmm / hmm));
+    const sc = document.createElement('canvas'); sc.width = img.width; sc.height = img.height;
+    const sctx = sc.getContext('2d'); sctx.drawImage(img, 0, 0);
+    const src = sctx.getImageData(0, 0, img.width, img.height).data, SW = img.width, SH = img.height;
+    const out = new ImageData(ow, oh), o = out.data;
+    for (let j = 0; j < oh; j++) {
+      const v = (j + 0.5) / oh;
+      for (let i = 0; i < ow; i++) {
+        const u = (i + 0.5) / ow, z = g * u + hh * v + 1;
+        let sx = (a * u + b * v + c) / z - 0.5, sy = (d * u + e * v + f) / z - 0.5;
+        sx = Math.max(0, Math.min(SW - 1.001, sx)); sy = Math.max(0, Math.min(SH - 1.001, sy));
+        const ix = sx | 0, iy = sy | 0, fx = sx - ix, fy = sy - iy;
+        const p00 = (iy * SW + ix) * 4, p10 = p00 + 4, p01 = p00 + SW * 4, p11 = p01 + 4, q = (j * ow + i) * 4;
+        for (let k = 0; k < 3; k++) o[q + k] = (src[p00 + k] * (1 - fx) + src[p10 + k] * fx) * (1 - fy) + (src[p01 + k] * (1 - fx) + src[p11 + k] * fx) * fy;
+        o[q + 3] = 255;
+      }
+    }
+    const oc = document.createElement('canvas'); oc.width = ow; oc.height = oh; oc.getContext('2d').putImageData(out, 0, 0);
+    const n = state.pages.filter(p => p.flat).length + 1;
+    ph.on = false;
+    state.pages.push({ i: state.pages.length + 1, w: wmm * PT_PER_MM, h: hmm * PT_PER_MM, on: true, isImage: true, flat: true, img: oc, label: 'Flat panel ' + n, slug: 'flat-panel' + n, copy: true });
+    renderCards().then(() => showMsg(`Added flat panel ${n}. Move the corners onto the next panel to add another.`, 'warn'));
+  }
+
   // ---------- Editor ----------
   let edTimer = null, edRef = null;
   async function openEditor(p) {
     state.editing = p;
-    const a = analyze(p.idx);
+    const a = analysisOf(p);
     $('editor').hidden = false;
     $('edTitle').textContent = p.label;
     $('edFont').value = p.edits.font;
@@ -643,10 +851,10 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
       cx.drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh);
       row.querySelector('.crop').appendChild(cc);
       const ti = row.querySelector('input[type=text]'), col = row.querySelector('.col'), hide = row.querySelector('.hide'), dir = row.querySelector('.dir');
-      ti.value = le.text || ''; col.value = le.color || ln.color; hide.checked = !!le.hide; if (dir) dir.value = le.dir || 'down';
+      ti.value = le.text || ''; if (p.gen) ti.placeholder = ln.text; col.value = le.color || ln.color; hide.checked = !!le.hide; if (dir) dir.value = le.dir || ln.dir || 'down';
       const upd = () => {
         const v = { text: ti.value, hide: hide.checked, dir: dir ? dir.value : undefined, color: col.value !== ln.color ? col.value : undefined };
-        if (!v.text && !v.hide && !v.color && (!v.dir || v.dir === 'down')) delete p.edits.lines[ln.id]; else p.edits.lines[ln.id] = v;
+        if (!v.text && !v.hide && !v.color && (!v.dir || v.dir === (ln.dir || 'down'))) delete p.edits.lines[ln.id]; else p.edits.lines[ln.id] = v;
         ti.disabled = hide.checked; scheduleRefresh();
       };
       ti.disabled = hide.checked;
@@ -712,7 +920,7 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
       const px = Math.round(x * k), py = Math.round(topPt * k);
       ctx.drawImage(c, px, py);
       ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = Math.max(1, k); ctx.strokeRect(px, py, c.width, c.height);
-      if (s.labels && !p.isImage) {
+      if (s.labels && (!p.isImage || p.gen || p.flat)) {
         ctx.textAlign = 'center';
         ctx.fillText(mm(p.w) + 'mm', px + c.width / 2, Math.round(topPt * k / 2));
         if (idx === 0) { ctx.textAlign = 'center'; ctx.fillText(mm(p.h) + 'mm', Math.round(marginPt * k / 2), py + c.height / 2) }
@@ -812,8 +1020,12 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 4px }
     for (const p of state.pages) { p.on = !all; if (p.card) { p.card.querySelector('input').checked = p.on; p.card.classList.toggle('off', !p.on) } }
     updateBar();
   });
+  $('rebuildBtn').addEventListener('click', rebuildWithAI);
+  $('straightenBtn').addEventListener('click', openStraighten);
+  $('stAdd').addEventListener('click', () => { busy('Flattening…'); setTimeout(() => { try { warpPanel() } finally { busy('') } }, 30) });
+  $('stClose').addEventListener('click', () => { $('stBox').hidden = true });
   $('edDone').addEventListener('click', () => closeEditor(true));
-  $('edReset').addEventListener('click', () => { const p = state.editing; if (!p) return; const f = p.edits.font; p.edits = newEdits(); p.edits.font = f; buildEditorList(p, analyze(p.idx)); refreshEditor() });
+  $('edReset').addEventListener('click', () => { const p = state.editing; if (!p) return; const f = p.edits.font; p.edits = newEdits(); p.edits.font = f; buildEditorList(p, analysisOf(p)); refreshEditor() });
   $('edFont').addEventListener('change', () => { const p = state.editing; if (!p) return; p.edits.font = $('edFont').value; refreshEditor() });
   $('exportBtn').addEventListener('click', () => exportPages(state.pages.filter(p => p.on), settings().mode));
 
