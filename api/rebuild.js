@@ -1,6 +1,8 @@
-// Vercel function: reads a product photo with Claude and returns flat panel artwork as JSON.
-// Needs ANTHROPIC_API_KEY in the Vercel project's environment variables.
+// Vercel function: reads a product photo with an AI model and returns flat panel artwork as JSON.
+// Set GEMINI_API_KEY (Google AI) or ANTHROPIC_API_KEY (Claude) in the Vercel project's environment
+// variables. With both set, AI_PROVIDER ("gemini" or "claude") picks one; otherwise Gemini is used.
 import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, ApiError } from "@google/genai";
 
 export const config = { maxDuration: 120 };
 
@@ -49,11 +51,56 @@ Describe each panel as a background colour plus elements:
 - kind "text": one element per line of text, with the exact text as printed (keep its case). The box is tight around the letters. rotation is 0 for normal horizontal text, 90 if the line reads top-to-bottom (letter tops face right), -90 if it reads bottom-to-top.
 x, y, w, h are fractions from 0 to 1 of the panel's width and height, origin at the top-left, giving the element's bounding box on the flat panel. Measure carefully from the photo so proportions match.`;
 
-const client = new Anthropic();
+// Gemini's schema support is narrower: drop additionalProperties and the rotation enum (the page validates rotation)
+const geminiSchema = (node) => {
+  if (Array.isArray(node)) return node.map(geminiSchema);
+  if (!node || typeof node !== "object") return node;
+  const out = {};
+  for (const [k, v] of Object.entries(node)) {
+    if (k === "additionalProperties") continue;
+    out[k] = geminiSchema(v);
+  }
+  if (out.type === "integer" && out.enum) delete out.enum;
+  return out;
+};
+
+function pickProvider() {
+  const want = (process.env.AI_PROVIDER || "").toLowerCase();
+  const hasGemini = !!process.env.GEMINI_API_KEY, hasClaude = !!process.env.ANTHROPIC_API_KEY;
+  if (want === "claude" && hasClaude) return "claude";
+  if (want === "gemini" && hasGemini) return "gemini";
+  return hasGemini ? "gemini" : hasClaude ? "claude" : null;
+}
+
+async function rebuildWithGemini(image, media_type, wmm, hmm, res) {
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  try {
+    const response = await ai.models.generateContent({
+      model: process.env.GEMINI_MODEL || "gemini-2.5-pro",
+      contents: [{ role: "user", parts: [{ inlineData: { mimeType: media_type, data: image } }, { text: prompt(wmm, hmm) }] }],
+      config: { responseMimeType: "application/json", responseJsonSchema: geminiSchema(SCHEMA) },
+    });
+    const text = response.text;
+    if (!text) return res.status(422).json({ error: "empty", message: "The AI returned nothing for this photo. Try a clearer, front-on photo." });
+    return res.status(200).json(JSON.parse(text));
+  } catch (e) {
+    if (e instanceof ApiError) {
+      if (e.status === 400 && /api key/i.test(e.message)) return res.status(500).json({ error: "bad_key", message: "The GEMINI_API_KEY in Vercel is not valid." });
+      if (e.status === 401 || e.status === 403) return res.status(500).json({ error: "bad_key", message: "The GEMINI_API_KEY in Vercel is not valid or lacks access to this model." });
+      if (e.status === 404) return res.status(500).json({ error: "bad_model", message: "That Gemini model is not available. Set GEMINI_MODEL in Vercel to a model your key can use." });
+      if (e.status === 429) return res.status(429).json({ error: "rate_limited", message: "Too many requests or quota used up on the Google key. Wait, then try again." });
+      return res.status(502).json({ error: "upstream", message: "The AI service had an error. Try again shortly." });
+    }
+    if (e instanceof SyntaxError) return res.status(502).json({ error: "bad_output", message: "The AI reply could not be read. Try again." });
+    console.error(e);
+    return res.status(500).json({ error: "server", message: "Something went wrong on the server." });
+  }
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "method", message: "Use POST." });
-  if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: "no_key", message: "ANTHROPIC_API_KEY is not set." });
+  const provider = pickProvider();
+  if (!provider) return res.status(503).json({ error: "no_key", message: "No AI key is set." });
 
   const { image, media_type, width_mm, height_mm } = req.body || {};
   const types = ["image/jpeg", "image/png", "image/webp"];
@@ -62,7 +109,9 @@ export default async function handler(req, res) {
   }
   const wmm = Math.min(5000, Math.max(10, Number(width_mm) || 370));
   const hmm = Math.min(5000, Math.max(10, Number(height_mm) || 770));
+  if (provider === "gemini") return rebuildWithGemini(image, media_type, wmm, hmm, res);
 
+  const client = new Anthropic();
   try {
     const response = await client.beta.messages.create({
       model: "claude-opus-5-5",

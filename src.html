@@ -688,7 +688,7 @@ Return only JSON in this shape: {"panels":[{"label":"short name such as GENERAL 
         catch (e) { throw new Error('AI rebuild needs the hosted version of this app. Open it from your Vercel link instead.') }
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
-          if (body.error === 'no_key') throw new Error('AI rebuild is not set up yet: add ANTHROPIC_API_KEY in the Vercel project settings, then redeploy.');
+          if (body.error === 'no_key') throw new Error('AI rebuild is not set up yet: add GEMINI_API_KEY (Google AI) or ANTHROPIC_API_KEY (Claude) in the Vercel project settings, then redeploy.');
           if (res.status === 404) throw new Error('AI rebuild needs the hosted version of this app. Open it from your Vercel link instead.');
           throw new Error(body.message || 'The AI could not read this photo. Try a clearer, front-on photo.');
         }
