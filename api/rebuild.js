@@ -72,8 +72,8 @@ function pickProvider() {
   return hasGemini ? "gemini" : hasClaude ? "claude" : null;
 }
 
-// Models get retired, so when the configured one is gone, use the newest stable Pro (else Flash) model this key can call
-async function fallbackGeminiModel(ai) {
+// Models get retired or refused, so list the Pro/Flash models this key can call: stable Pro first, newest first
+async function geminiModelCandidates(ai) {
   const found = [];
   for await (const m of await ai.models.list()) {
     const name = (m.name || "").replace(/^models\//, "");
@@ -81,7 +81,7 @@ async function fallbackGeminiModel(ai) {
     if (v && (m.supportedActions || ["generateContent"]).includes("generateContent")) found.push({ name, ver: +v[1], pro: v[2] === "pro", stable: !v[3] });
   }
   found.sort((a, b) => b.pro - a.pro || b.stable - a.stable || b.ver - a.ver);
-  return found.length ? found[0].name : null;
+  return found.map(m => m.name);
 }
 
 async function rebuildWithGemini(image, media_type, wmm, hmm, res) {
@@ -97,10 +97,12 @@ async function rebuildWithGemini(image, media_type, wmm, hmm, res) {
     try { response = await generate(wanted) }
     catch (e) {
       if (!(e instanceof ApiError && e.status === 404)) throw e;
-      const alt = await fallbackGeminiModel(ai).catch(() => null);
-      if (!alt || alt === wanted) return res.status(500).json({ error: "bad_model", message: `The Gemini model "${wanted}" is not available to this key. Set GEMINI_MODEL in Vercel to a model your key can use.` });
-      console.warn(`Gemini model ${wanted} not found; using ${alt}`);
-      response = await generate(alt);
+      const alts = (await geminiModelCandidates(ai).catch(err => { console.error("Listing Gemini models failed", err); return [] })).filter(n => n !== wanted);
+      for (const alt of alts.slice(0, 4)) {
+        try { response = await generate(alt); console.warn(`Gemini model ${wanted} not found; used ${alt}`); break }
+        catch (err) { if (!(err instanceof ApiError && err.status === 404)) throw err }
+      }
+      if (!response) return res.status(500).json({ error: "bad_model", message: `The Gemini model "${wanted}" is not available to this key, and no other Gemini Pro or Flash model worked. Set GEMINI_MODEL in Vercel to a model your key can use.` });
     }
     const text = response.text;
     if (!text) return res.status(422).json({ error: "empty", message: "The AI returned nothing for this photo. Try a clearer, front-on photo." });
