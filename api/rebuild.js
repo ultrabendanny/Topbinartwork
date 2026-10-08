@@ -96,13 +96,19 @@ async function rebuildWithGemini(image, media_type, wmm, hmm, res) {
     let response;
     try { response = await generate(wanted) }
     catch (e) {
-      if (!(e instanceof ApiError && e.status === 404)) throw e;
+      // 404: model gone. 429: no quota for it on this key (free keys often have Flash quota but not Pro)
+      if (!(e instanceof ApiError && (e.status === 404 || e.status === 429))) throw e;
+      let lastErr = e;
       const alts = (await geminiModelCandidates(ai).catch(err => { console.error("Listing Gemini models failed", err); return [] })).filter(n => n !== wanted);
+      if (e.status === 429) alts.sort((x, y) => /flash/.test(y) - /flash/.test(x));
       for (const alt of alts.slice(0, 4)) {
-        try { response = await generate(alt); console.warn(`Gemini model ${wanted} not found; used ${alt}`); break }
-        catch (err) { if (!(err instanceof ApiError && err.status === 404)) throw err }
+        try { response = await generate(alt); console.warn(`Gemini model ${wanted} refused (${e.status}); used ${alt}`); break }
+        catch (err) { if (!(err instanceof ApiError && (err.status === 404 || err.status === 429))) throw err; lastErr = err }
       }
-      if (!response) return res.status(500).json({ error: "bad_model", message: `The Gemini model "${wanted}" is not available to this key, and no other Gemini Pro or Flash model worked. Set GEMINI_MODEL in Vercel to a model your key can use.` });
+      if (!response) {
+        if (lastErr.status === 429) throw lastErr;
+        return res.status(500).json({ error: "bad_model", message: `The Gemini model "${wanted}" is not available to this key, and no other Gemini Pro or Flash model worked. Set GEMINI_MODEL in Vercel to a model your key can use.` });
+      }
     }
     const text = response.text;
     if (!text) return res.status(422).json({ error: "empty", message: "The AI returned nothing for this photo. Try a clearer, front-on photo." });
